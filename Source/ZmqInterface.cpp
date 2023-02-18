@@ -414,10 +414,10 @@ bool ZmqInterface::stopAcquisition()
 }
 
 int ZmqInterface::sendData(float *data, 
-    int channelNum, 
-    int nSamples, 
-    int64 sampleNumber, 
-    float sampleRate)
+                           int channelNum, 
+                           int nSamples, 
+                           int64 sampleNumber, 
+                           float sampleRate)
 {
     
     messageNumber++;
@@ -503,15 +503,15 @@ int ZmqInterface::sendSpikeEvent(const SpikePtr spike)
                 t_var.append(spike->getThreshold(i));
             c_obj->setProperty("threshold", t_var);
 
-            obj->setProperty("spike", var(c_obj));
+            obj->setProperty("content", var(c_obj));
             var json (obj);
             String s = JSON::toString(json);
             void *headerData = (void *)s.toRawUTF8();
             size_t headerSize = s.length();
            
             zmq_msg_t messageEnvelope;
-            zmq_msg_init_size(&messageEnvelope, strlen("EVENT")+1);
-            memcpy(zmq_msg_data(&messageEnvelope), "EVENT", strlen("EVENT")+1);
+            zmq_msg_init_size(&messageEnvelope, strlen("SPIKE")+1);
+            memcpy(zmq_msg_data(&messageEnvelope), "SPIKE", strlen("SPIKE")+1);
             size = zmq_msg_send(&messageEnvelope, socket, ZMQ_SNDMORE);
             jassert(size != -1);
             zmq_msg_close(&messageEnvelope);
@@ -595,6 +595,64 @@ int ZmqInterface::sendEvent( uint8 type,
     return size;
 }
 
+int ZmqInterface::checkForEvents(bool respondToSpikes)
+{
+    if (m_currentMidiBuffer->getNumEvents() > 0)
+    {
+        /** Since adding events to the buffer inside this loop could be dangerous, create a temporary event buffer
+            so any call to addEvent will operate on it; */
+        MidiBuffer temporaryEventBuffer;
+        MidiBuffer* originalEventBuffer = m_currentMidiBuffer;
+        m_currentMidiBuffer = &temporaryEventBuffer;
+
+        for (const auto meta : *originalEventBuffer) {
+
+            const uint8* dataptr = meta.data;
+
+            const uint16 sourceProcessorId = EventBase::getProcessorId(dataptr);
+            const uint16 sourceStreamId = EventBase::getStreamId(dataptr);
+            const uint16 sourceChannelIdx = EventBase::getChannelIndex(dataptr);
+
+            if (EventBase::getBaseType(dataptr) == Event::Type::PROCESSOR_EVENT)
+            {
+                if (static_cast<EventChannel::Type>(*(dataptr + 1) == EventChannel::Type::TTL))
+                {
+                    const EventChannel* eventChannel = getEventChannel(sourceProcessorId, sourceStreamId, sourceChannelIdx);
+
+                    if (eventChannel != nullptr)
+                    {
+                        handleTTLEvent(TTLEvent::deserialize(dataptr, eventChannel));
+                    }
+                }
+                else if (static_cast<EventChannel::Type>(*(dataptr + 1) == EventChannel::Type::TEXT))
+                {
+                    handleTextEvent(TextEvent::deserialize(dataptr, getMessageChannel()));
+                }
+            }
+            else if (respondToSpikes && EventBase::getBaseType(dataptr) == Event::Type::SPIKE_EVENT)
+            {
+                const SpikeChannel* spikeChannel = getSpikeChannel(sourceProcessorId, sourceStreamId, sourceChannelIdx);
+
+                if (spikeChannel != nullptr)
+                {
+                    handleSpike(Spike::deserialize(dataptr, spikeChannel));
+                }
+            }
+        }
+        // Restore the original buffer pointer and, if some new events have 
+        // been added here, copy them to the original buffer
+        m_currentMidiBuffer = originalEventBuffer;
+
+        if (temporaryEventBuffer.getNumEvents() > 0)
+        {
+            m_currentMidiBuffer->addEvents(temporaryEventBuffer, 0, -1, 0);
+        }
+
+        return 0;
+    }
+
+    return -1;
+}
 
 void ZmqInterface::handleTTLEvent(TTLEventPtr event)
 {
@@ -616,6 +674,16 @@ void ZmqInterface::handleSpike(SpikePtr spike)
 {
     if(spike->getStreamId() == selectedStream)
         sendSpikeEvent(spike);
+}
+
+void ZmqInterface::handleTextEvent(TextEventPtr event)
+{
+	const String msg = event->getText();
+    sendEvent(EventChannel::TEXT,
+        event->getSampleNumber(),
+        0,
+        msg.getNumBytesAsUTF8(),
+        reinterpret_cast<const uint8*>(msg.toRawUTF8()));
 }
 
 int ZmqInterface::receiveEvents()
