@@ -99,15 +99,11 @@ private:
     /** Called at the end of acquisition */
     bool stopAcquisition();
 
-    /** Can be called by processors that need to respond to incoming events.
-    Set respondToSpikes to true if the processor should also search for spikes*/
-    int checkForEvents(bool respondToSpikes = false) override;
-
     /** Called whenever a new TTL event arrives */
     void handleTTLEvent(TTLEventPtr event) override;
 
-    /** Called whenever a new Text event arrives */
-    void handleTextEvent(TextEventPtr event);
+    /** Called whenever a new message arrives */
+    void handleBroadcastMessage(String msg) override;
 
     /** Called whenever a new spike arrives */
     void handleSpike (SpikePtr spike) override;

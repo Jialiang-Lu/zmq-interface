@@ -595,69 +595,9 @@ int ZmqInterface::sendEvent( uint8 type,
     return size;
 }
 
-int ZmqInterface::checkForEvents(bool respondToSpikes)
-{
-    if (m_currentMidiBuffer->getNumEvents() > 0)
-    {
-        /** Since adding events to the buffer inside this loop could be dangerous, create a temporary event buffer
-            so any call to addEvent will operate on it; */
-        MidiBuffer temporaryEventBuffer;
-        MidiBuffer* originalEventBuffer = m_currentMidiBuffer;
-        m_currentMidiBuffer = &temporaryEventBuffer;
-
-        for (const auto meta : *originalEventBuffer) {
-
-            const uint8* dataptr = meta.data;
-
-            const uint16 sourceProcessorId = EventBase::getProcessorId(dataptr);
-            const uint16 sourceStreamId = EventBase::getStreamId(dataptr);
-            const uint16 sourceChannelIdx = EventBase::getChannelIndex(dataptr);
-
-            if (EventBase::getBaseType(dataptr) == Event::Type::PROCESSOR_EVENT)
-            {
-                if (static_cast<EventChannel::Type>(*(dataptr + 1) == EventChannel::Type::TTL))
-                {
-                    const EventChannel* eventChannel = getEventChannel(sourceProcessorId, sourceStreamId, sourceChannelIdx);
-
-                    if (eventChannel != nullptr)
-                    {
-                        handleTTLEvent(TTLEvent::deserialize(dataptr, eventChannel));
-                    }
-                }
-                else if (static_cast<EventChannel::Type>(*(dataptr + 1) == EventChannel::Type::TEXT))
-                {
-                    handleTextEvent(TextEvent::deserialize(dataptr, getMessageChannel()));
-                }
-            }
-            else if (respondToSpikes && EventBase::getBaseType(dataptr) == Event::Type::SPIKE_EVENT)
-            {
-                const SpikeChannel* spikeChannel = getSpikeChannel(sourceProcessorId, sourceStreamId, sourceChannelIdx);
-
-                if (spikeChannel != nullptr)
-                {
-                    handleSpike(Spike::deserialize(dataptr, spikeChannel));
-                }
-            }
-        }
-        // Restore the original buffer pointer and, if some new events have 
-        // been added here, copy them to the original buffer
-        m_currentMidiBuffer = originalEventBuffer;
-
-        if (temporaryEventBuffer.getNumEvents() > 0)
-        {
-            m_currentMidiBuffer->addEvents(temporaryEventBuffer, 0, -1, 0);
-        }
-
-        return 0;
-    }
-
-    return -1;
-}
-
 void ZmqInterface::handleTTLEvent(TTLEventPtr event)
 {
-
-    if (event->getEventType() == EventChannel::TTL && event->getStreamId() == selectedStream)
+        if (event->getEventType() == EventChannel::TTL && event->getStreamId() == selectedStream)
     {
         const uint8* dataptr = reinterpret_cast<const uint8*>(event->getRawDataPointer());
         uint8 numBytes = event->getChannelInfo()->getDataSize();
@@ -676,11 +616,10 @@ void ZmqInterface::handleSpike(SpikePtr spike)
         sendSpikeEvent(spike);
 }
 
-void ZmqInterface::handleTextEvent(TextEventPtr event)
+void ZmqInterface::handleBroadcastMessage(String msg)
 {
-	const String msg = event->getText();
     sendEvent(EventChannel::TEXT,
-        event->getSampleNumber(),
+        getFirstSampleNumberForBlock(selectedStream),
         0,
         msg.getNumBytesAsUTF8(),
         reinterpret_cast<const uint8*>(msg.toRawUTF8()));
