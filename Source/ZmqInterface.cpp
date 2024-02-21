@@ -207,15 +207,15 @@ void ZmqInterface::openListenSocket()
 int ZmqInterface::closeListenSocket()
 {
     int rc = 0;
-
-    LOGD("Closing listening socket");
-    
-    stopTimer();
-
-    stopThread(500);
     
     if (listenSocket)
     {
+        LOGD("Closing listening socket");
+    
+        stopTimer();
+
+        stopThread(500);
+        
         rc = zmq_close(listenSocket);
         listenSocket = nullptr;
     }
@@ -438,6 +438,7 @@ int ZmqInterface::sendData(float *data,
 
     obj->setProperty("content", var(c_obj));
     obj->setProperty("data_size", (int)(nSamples * sizeof(float)));
+    obj->setProperty("timestamp", Time::currentTimeMillis());
     
     var json(obj);
     
@@ -503,7 +504,9 @@ int ZmqInterface::sendSpikeEvent(const SpikePtr spike)
                 t_var.append(spike->getThreshold(i));
             c_obj->setProperty("threshold", t_var);
 
-            obj->setProperty("content", var(c_obj));
+            obj->setProperty("spike", var(c_obj));
+            obj->setProperty("timestamp", Time::currentTimeMillis());
+
             var json (obj);
             String s = JSON::toString(json);
             void *headerData = (void *)s.toRawUTF8();
@@ -556,6 +559,7 @@ int ZmqInterface::sendEvent( uint8 type,
     
     obj->setProperty("content", var(c_obj));
     obj->setProperty("data_size", (int)numBytes);
+    obj->setProperty("timestamp", Time::currentTimeMillis());
     
     var json (obj);
     String s = JSON::toString(json);
@@ -790,13 +794,18 @@ void ZmqInterface::parameterValueChanged(Parameter* param)
     }
     else if (param->getName().equalsIgnoreCase("data_port"))
     {
-        // close previous sockets and assign new ports
+        int newDataPort = static_cast<IntParameter*>(param)->getIntValue();
         
-        closeListenSocket();
-        closeDataSocket();
-        dataPort = static_cast<IntParameter*>(param)->getIntValue();
-        listenPort = dataPort + 1;
-        openListenSocket();
-        openDataSocket();
+        if(dataPort != newDataPort)
+        {
+            // close previous sockets and assign new ports
+            
+            closeListenSocket();
+            closeDataSocket();
+            dataPort = newDataPort;
+            listenPort = dataPort + 1;
+            openListenSocket();
+            openDataSocket();
+        }
     }
 }
