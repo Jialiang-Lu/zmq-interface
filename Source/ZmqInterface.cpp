@@ -504,7 +504,7 @@ int ZmqInterface::sendSpikeEvent(const SpikePtr spike)
                 t_var.append(spike->getThreshold(i));
             c_obj->setProperty("threshold", t_var);
 
-            obj->setProperty("spike", var(c_obj));
+            obj->setProperty("content", var(c_obj));
             obj->setProperty("timestamp", Time::currentTimeMillis());
 
             var json (obj);
